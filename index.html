@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#070a14">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Slosh">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M12 2.5c-3.2 4.3-6.5 7.8-6.5 11.4a6.5 6.5 0 0 0 13 0c0-3.6-3.3-7.1-6.5-11.4z%22 fill=%22%233b8cff%22/%3E%3C/svg%3E">
+<title>Slosh Liquid Simulator</title>
+<style>
+:root{
+  /* one dark lab tank: full-bleed liquid canvas, quiet glass controls floating at the edges */
+  color-scheme: dark;
+  --ink: #070a14;
+  --glass: rgba(16,22,42,.64);
+  --line: rgba(255,255,255,.14);
+  --text: #eef3ff;
+  --muted: rgba(222,232,255,.66);
+  --accent: #5cb8ff;
+  --font-display: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--ink);color:var(--text);overflow:hidden;
+  font-family:var(--font-body);
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none;touch-action:none}
+#stage{position:fixed;inset:0;overflow:hidden;background:var(--ink)}
+#gl{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;will-change:transform}
+button{font:inherit;color:inherit;border:0;background:none;padding:0;margin:0;cursor:pointer;touch-action:manipulation}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(18px) saturate(150%);backdrop-filter:blur(18px) saturate(150%);
+  border:1px solid var(--line);box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.07)}
+
+/* top bar */
+#topbar{position:fixed;top:calc(12px + env(safe-area-inset-top));left:calc(12px + env(safe-area-inset-left));right:calc(12px + env(safe-area-inset-right));display:flex;justify-content:space-between;align-items:center;pointer-events:none;z-index:5}
+.brand{pointer-events:auto;display:flex;align-items:center;gap:8px;padding:7px 14px 7px 9px;border-radius:999px;font-weight:800;font-size:16px;letter-spacing:-.1px;font-family:var(--font-display)}
+.brand svg{width:20px;height:20px}
+#gchip{pointer-events:auto;display:flex;align-items:center;gap:9px;padding:5px 13px 5px 5px;border-radius:999px;font-size:11.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase}
+#gdial{position:relative;width:30px;height:30px;border-radius:50%;background:rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);flex:none}
+#gdial::before{content:"";position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px;border-radius:50%;background:rgba(255,255,255,.7)}
+#garrow{position:absolute;left:50%;top:50%;width:2.5px;height:11px;margin-left:-1.25px;background:#fff;border-radius:2px;transform-origin:50% 0}
+#garrow::after{content:"";position:absolute;left:50%;bottom:-5px;margin-left:-4px;border-left:4px solid transparent;border-right:4px solid transparent;border-top:6px solid #fff}
+#gchip .live{width:7px;height:7px;border-radius:50%;background:#7cf29a;box-shadow:0 0 8px #7cf29a;display:none}
+#gchip.on .live{display:block}
+
+/* dock */
+#dock{position:fixed;left:50%;bottom:calc(14px + env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:6px;border-radius:999px;z-index:5;max-width:calc(100% - 20px)}
+.btn{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:var(--text);transition:background .15s,transform .12s;flex:none}
+.btn svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.btn:active{transform:scale(.9)}
+.btn.on{background:rgba(255,255,255,.17);box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+.btn.hot{background:rgba(79,176,255,.3)}
+.sep{width:1px;height:26px;background:var(--line);margin:0 4px;flex:none}
+#swatches{display:none;gap:7px;padding:0 6px 0 8px;align-items:center}
+#dock.pouring #swatches{display:flex}
+.sw{width:30px;height:30px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 2px rgba(255,255,255,.22);transition:transform .12s}
+.sw.on{transform:scale(1.12);box-shadow:inset 0 0 0 3px #fff,0 0 0 2px rgba(0,0,0,.35)}
+
+/* scenes popover */
+#presets{position:fixed;left:50%;bottom:80px;transform:translateX(-50%);z-index:7;border-radius:20px;padding:8px;min-width:228px;display:grid;gap:2px}
+#presets .ptitle{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted);padding:6px 10px 4px;font-weight:700}
+#presets button{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;font-size:15px;font-weight:600;text-align:left}
+#presets button:active{background:rgba(255,255,255,.1)}
+#presets i{width:22px;height:22px;border-radius:50%;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.2)}
+
+/* tilt pad */
+#tiltpad{position:fixed;left:16px;bottom:16px;width:132px;height:132px;z-index:6;touch-action:none;display:none}
+#tiltpad.show{display:block}
+#tiltpad .base{position:absolute;inset:0;border-radius:50%}
+#tiltpad svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+#knob{position:absolute;left:50%;top:50%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle at 34% 30%,#fff,#bcd6ff 42%,#4f86e6 100%);box-shadow:0 6px 16px rgba(0,0,0,.45),0 0 0 3px rgba(255,255,255,.14)}
+.padlabel{position:absolute;left:0;right:0;top:-19px;text-align:center;font-size:10.5px;letter-spacing:1.8px;color:var(--muted);font-weight:800}
+#tiltpad.hint .base{animation:pulse 1.1s ease-in-out 4}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(90,180,255,.0),0 10px 30px rgba(0,0,0,.35)}50%{box-shadow:0 0 0 12px rgba(90,180,255,.28),0 10px 30px rgba(0,0,0,.35)}}
+
+/* settings */
+#sheetwrap{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:rgba(3,5,12,.5);padding:20px}
+#sheet{width:min(410px,100%);border-radius:24px;padding:14px 18px 18px}
+.shead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:18px}
+.shead .btn{width:36px;height:36px;font-size:16px;background:rgba(255,255,255,.08)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid rgba(255,255,255,.08)}
+.row label{font-size:14.5px;color:var(--muted)}
+.pills{display:flex;background:rgba(255,255,255,.07);border-radius:12px;padding:3px;gap:2px}
+.pills button{padding:7px 11px;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--muted)}
+.pills button.on{background:rgba(255,255,255,.17);color:#fff}
+.pillbtn{padding:8px 12px;border-radius:12px;background:rgba(255,255,255,.09);font-size:13.5px;font-weight:600}
+.pillbtn.wide{width:100%;margin-top:4px;padding:11px}
+.note{font-size:13px;color:var(--muted);line-height:1.45;margin:10px 0 8px}
+.note b{color:#fff}
+
+/* start */
+#start{position:fixed;inset:0;display:grid;place-items:center;z-index:20;padding:20px;
+  background:radial-gradient(ellipse at center,rgba(5,8,18,.15),rgba(5,8,18,.72));transition:opacity .35s}
+#start.gone{opacity:0;pointer-events:none}
+.card{width:min(420px,100%);border-radius:28px;padding:26px 24px 20px;text-align:center}
+.card .logo{width:64px;height:64px;margin:0 auto}
+.card h1{margin:8px 0 2px;font-size:46px;line-height:1.05;letter-spacing:-1.2px;font-family:var(--font-display);font-weight:800;text-wrap:balance}
+.card .sub{color:var(--muted);margin:0 0 18px;font-size:16px}
+.how{list-style:none;margin:0 0 20px;padding:0;display:grid;gap:8px;text-align:left}
+.how li{display:flex;gap:12px;align-items:center;padding:9px 12px;border-radius:14px;background:rgba(255,255,255,.05);font-size:15px;line-height:1.3}
+.how .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:rgba(79,176,255,.16);color:#9fd6ff;flex:none}
+.how .ic svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cta{width:100%;height:54px;border-radius:16px;font-size:18px;font-weight:750;color:#fff;
+  background:linear-gradient(180deg,#5cb8ff,#2f7cf0);box-shadow:0 8px 24px rgba(47,124,240,.45),inset 0 1px 0 rgba(255,255,255,.35)}
+.cta:active{transform:scale(.98)}
+.fine{color:var(--muted);font-size:12.5px;margin:12px 0 0;line-height:1.4}
+
+#toast{position:fixed;top:62px;left:50%;transform:translate(-50%,-8px);z-index:40;padding:10px 16px;border-radius:999px;font-size:14px;font-weight:600;
+  opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:calc(100% - 32px);text-align:center;background:rgba(16,22,42,.9);border:1px solid var(--line)}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:920px){#tiltpad{bottom:84px}}
+@media (prefers-reduced-motion:reduce){#tiltpad.hint .base{animation:none}#start,#toast{transition:none}}
+@media (max-width:560px){
+  .btn{width:40px;height:40px}.btn svg{width:21px;height:21px}
+  .sw{width:26px;height:26px}#swatches{gap:5px;padding:0 4px}
+  #tiltpad{width:112px;height:112px}
+  .brand span{display:none}
+}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas></div>
+
+<div id="topbar">
+  <div class="brand glass">
+    <svg viewBox="0 0 24 24"><defs><linearGradient id="dg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fd0ff"/><stop offset="1" stop-color="#2f6fff"/></linearGradient></defs><path d="M12 2.5c-3.2 4.3-6.5 7.8-6.5 11.4a6.5 6.5 0 0 0 13 0c0-3.6-3.3-7.1-6.5-11.4z" fill="url(#dg)"/><path d="M9 14.5a3 3 0 0 0 2.6 2.9" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".8"/></svg>
+    <span>Slosh</span>
+  </div>
+  <button id="gchip" class="glass" aria-label="Gravity and settings">
+    <span id="gdial"><span id="garrow"></span></span>
+    <span id="glabel">Demo</span><span class="live"></span>
+  </button>
+</div>
+
+<div id="dock" class="glass">
+  <div style="display:flex;gap:2px" id="tools">
+    <button class="btn on" data-tool="stir" aria-label="Stir" title="Stir">
+      <svg viewBox="0 0 24 24"><path d="M12.2 12.3c.9-.6 2.1.1 2 1.2-.2 1.8-2.6 2.4-3.9 1.3-1.9-1.5-1.3-4.6.9-5.5 2.9-1.2 6 .9 6.1 4 .1 4-4 6.6-7.6 5.3-4.6-1.6-5.7-7.5-2.6-10.9 3-3.3 8.4-3.3 11.4-.1"/></svg>
+    </button>
+    <button class="btn" data-tool="pour" aria-label="Pour" title="Pour">
+      <svg viewBox="0 0 24 24"><path d="M12 3.2c-3 4-6 7.3-6 10.6a6 6 0 0 0 12 0c0-3.3-3-6.6-6-10.6z"/><path d="M9.2 14.2a2.9 2.9 0 0 0 2.4 2.7"/></svg>
+    </button>
+    <button class="btn" data-tool="erase" aria-label="Erase" title="Erase">
+      <svg viewBox="0 0 24 24"><path d="M15.6 4.6l3.8 3.8a1.6 1.6 0 0 1 0 2.3L11.1 19H7l-3-3a1.6 1.6 0 0 1 0-2.3l9.3-9.1a1.6 1.6 0 0 1 2.3 0z"/><path d="M9 9.6l5.4 5.4M11.1 19H20"/></svg>
+    </button>
+  </div>
+  <div id="swatches"></div>
+  <span class="sep"></span>
+  <button class="btn" id="shakeBtn" aria-label="Shake (hold)" title="Shake (hold)">
+    <svg viewBox="0 0 24 24"><rect x="8" y="5" width="8" height="14" rx="2"/><path d="M4.5 9.5l-1.5 2.5 1.5 2.5M19.5 9.5l1.5 2.5-1.5 2.5"/></svg>
+  </button>
+  <button class="btn" id="resetBtn" aria-label="Scenes" title="Scenes">
+    <svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.3-5.4"/><path d="M4.3 4.5v4.3h4.3"/></svg>
+  </button>
+  <button class="btn" id="setBtn" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+  </button>
+</div>
+
+<div id="presets" class="glass" hidden>
+  <div class="ptitle">New scene</div>
+  <button data-scene="twin"><i style="background:linear-gradient(90deg,#ff3d7f 50%,#16d6c3 50%)"></i>Twin towers</button>
+  <button data-scene="dam"><i style="background:linear-gradient(#5fb0ff,#2f8cff)"></i>Dam break</button>
+  <button data-scene="layers"><i style="background:linear-gradient(#a3e635,#16d6c3,#2f8cff,#8b5cff)"></i>Layer cake</button>
+  <button data-scene="orb"><i style="background:conic-gradient(#8b5cff,#2f8cff,#16d6c3,#a3e635,#ffa21a,#ff3d7f,#8b5cff)"></i>Rainbow orb</button>
+  <button data-scene="empty"><i style="background:transparent;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4)"></i>Empty tank</button>
+</div>
+
+<div id="tiltpad" aria-label="Tilt pad">
+  <div class="base glass"></div>
+  <svg viewBox="0 0 132 132" id="padsvg">
+    <circle cx="66" cy="66" r="10" fill="none" stroke="rgba(255,255,255,.2)" stroke-dasharray="2 3"/>
+    <path d="M66 14v104M14 66h104" stroke="rgba(255,255,255,.08)"/>
+    <line id="padline" x1="66" y1="66" x2="66" y2="111" stroke="rgba(150,200,255,.65)" stroke-width="3" stroke-linecap="round"/>
+  </svg>
+  <div id="knob"></div>
+  <div class="padlabel">TILT</div>
+</div>
+
+<div id="sheetwrap" hidden>
+  <div id="sheet" class="glass" role="dialog" aria-label="Settings">
+    <div class="shead"><b>Settings</b><button id="closeSheet" class="btn" aria-label="Close">✕</button></div>
+    <div class="row"><label>Quality</label><div class="pills" data-key="quality"><button data-v="low">Low</button><button data-v="med">Medium</button><button data-v="high">High</button></div></div>
+    <div class="row"><label>Color mixing</label><div class="pills" data-key="mix"><button data-v="off">Off</button><button data-v="slow">Slow</button><button data-v="fast">Fast</button></div></div>
+    <div class="row"><label>Shake power</label><div class="pills" data-key="shake"><button data-v="1">1×</button><button data-v="2">2×</button><button data-v="3">3×</button></div></div>
+    <div class="row gyro-only"><label>Control with</label><div class="pills" data-key="control"><button data-v="gyro">Gyro</button><button data-v="pad">Tilt pad</button></div></div>
+    <div class="row gyro-only"><label>Tilt feels sideways?</label><button id="rotTilt" class="pillbtn">Rotate 90°</button></div>
+    <p id="gyroStatus" class="note"></p>
+    <button id="retryGyro" class="pillbtn wide">Try gyro again</button>
+  </div>
+</div>
+
+<div id="start">
+  <div class="card glass">
+    <svg class="logo" viewBox="0 0 64 64"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8fe3ff"/><stop offset=".55" stop-color="#3b8cff"/><stop offset="1" stop-color="#8b5cff"/></linearGradient></defs><path d="M32 5c-8.5 11.4-17 20.6-17 30.2a17 17 0 0 0 34 0C49 25.6 40.5 16.4 32 5z" fill="url(#lg)"/><path d="M23.5 37a8.5 8.5 0 0 0 7.2 8.2" stroke="#fff" stroke-width="3.2" fill="none" stroke-linecap="round" opacity=".85"/></svg>
+    <h1>Slosh</h1>
+    <p class="sub">A liquid you can tilt, shake and stir.</p>
+    <ul class="how">
+      <li><span class="ic"><svg viewBox="0 0 24 24"><rect x="7" y="3.5" width="10" height="17" rx="2.2" transform="rotate(-18 12 12)"/></svg></span><span><b>Tilt</b> your iPad (or drag the tilt pad) to pour it around</span></li>
+      <li><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 10c2-2.4 4 2.4 6 0s4-2.4 6 0 4 2.4 6 0M3 15c2-2.4 4 2.4 6 0s4-2.4 6 0 4 2.4 6 0"/></svg></span><span><b>Shake</b> to make waves</span></li>
+      <li><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 11V5.5a1.5 1.5 0 0 1 3 0V11m0-1.5a1.5 1.5 0 0 1 3 0V11m0-.5a1.5 1.5 0 0 1 3 0v4a6 6 0 0 1-6 6h-.6a6 6 0 0 1-4.6-2.2L4.6 15.5a1.5 1.5 0 0 1 2.2-2L9 15"/></svg></span><span><b>Touch</b> with up to five fingers to stir, pour or erase</span></li>
+    </ul>
+    <button id="startBtn" class="cta">Start</button>
+    <p class="fine" id="fine">If your iPad asks for motion access, tap Allow.<br>Turn on Rotation Lock so the screen doesn’t flip while you tilt.</p>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+
+// ===================================================================
+//  Constants & settings
+// ===================================================================
+const DEG = Math.PI / 180;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const FLUID = 0, AIR = 1, SOLID = 2;
+
+const QUALITY = {
+  low:  { res: 44, dpr: 1.25, pressure: 30 },
+  med:  { res: 60, dpr: 1.5,  pressure: 40 },
+  high: { res: 78, dpr: 2.0,  pressure: 50 },
+};
+const QUALITY_ORDER = ['low', 'med', 'high'];
+const MIX = { off: 0, slow: 0.0004, fast: 0.003 };
+const SHAKE_GAIN = { 1: 1.0, 2: 1.8, 3: 2.8 };
+
+const SHORT_SIDE = 2.0;     // simulated metres across the short side of the screen
+const GRAVITY = 9.81;
+const G_GAIN = 1.25;        // a half-tilted iPad still pours briskly
+const VMAX = 9;
+const FLIP_RATIO = 0.92;
+const OMEGA = 1.9;
+const SEP_ITERS = 2;
+const REST_DENSITY = 3.0;   // particles per cell for r = 0.3h hex packing (minus boundary loss)
+const STIR_R = 0.075 * SHORT_SIDE;
+const POUR_R = 0.045 * SHORT_SIDE;
+const ERASE_R = 0.07 * SHORT_SIDE;
+const POUR_AREA_RATE = 0.22;  // m² of liquid per second
+const ERASE_AREA_RATE = 0.55;
+
+const PALETTE = [
+  ['#2f8cff', 'Ocean'], ['#16d6c3', 'Lagoon'], ['#ff3d7f', 'Berry'],
+  ['#ffa21a', 'Mango'], ['#a3e635', 'Lime'], ['#8b5cff', 'Grape'],
+];
+const rgbOf = hex => { const n = parseInt(hex.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; };
+const COLORS = PALETTE.map(p => rgbOf(p[0]));
+const RAINBOW = [COLORS[5], COLORS[0], COLORS[1], COLORS[4], COLORS[3], COLORS[2]];
+const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const rainbowAt = t => { const x = ((t % 1) + 1) % 1 * 6, i = Math.floor(x); return mixc(RAINBOW[i % 6], RAINBOW[(i + 1) % 6], x - i); };
+
+const settings = { quality: 'med', mix: 'slow', shake: 2, tiltOffset: 0, preferPad: false };
+try {
+  const s = JSON.parse(localStorage.getItem('slosh.v1') || 'null');
+  if (s && typeof s === 'object') {
+    if (QUALITY[s.quality]) settings.quality = s.quality;
+    if (s.mix in MIX) settings.mix = s.mix;
+    if (SHAKE_GAIN[s.shake]) settings.shake = s.shake;
+    if ([0, 90, 180, 270].includes(s.tiltOffset)) settings.tiltOffset = s.tiltOffset;
+    settings.preferPad = !!s.preferPad;
+  }
+} catch (e) { /* storage unavailable */ }
+const saveSettings = () => { try { localStorage.setItem('slosh.v1', JSON.stringify(settings)); } catch (e) {} };
+
+// ===================================================================
+//  FLIP fluid solver (2D, MAC grid + particles), y axis points DOWN
+// ===================================================================
+class Fluid {
+  constructor(innerW, innerH, h, cap) {
+    this.h = h; this.invH = 1 / h;
+    this.nx = Math.max(6, Math.round(innerW / h) + 2);
+    this.ny = Math.max(6, Math.round(innerH / h) + 2);
+    this.innerW = (this.nx - 2) * h;
+    this.innerH = (this.ny - 2) * h;
+    this.W = this.nx * h; this.H = this.ny * h;
+    const n = this.numCells = this.nx * this.ny;
+    this.u = new Float32Array(n); this.v = new Float32Array(n);
+    this.du = new Float32Array(n); this.dv = new Float32Array(n);
+    this.pu = new Float32Array(n); this.pv = new Float32Array(n);
+    this.s = new Float32Array(n);
+    this.type = new Int32Array(n);
+    this.dens = new Float32Array(n);
+    this.fluidCells = new Int32Array(n); this.numFluid = 0;
+    this.restDensity = REST_DENSITY;
+    this.r = 0.3 * h;
+    this.vx0 = h + this.r; this.vy0 = h + this.r;              // visible window in sim units
+    this.vw = this.innerW - 2 * this.r; this.vh = this.innerH - 2 * this.r;
+    this.cap = cap; this.num = 0;
+    this.pos = new Float32Array(2 * cap);
+    this.vel = new Float32Array(2 * cap);
+    this.col = new Float32Array(3 * cap);
+    this.pInv = 1 / (2.2 * this.r);
+    this.pnx = Math.floor(this.W * this.pInv) + 1;
+    this.pny = Math.floor(this.H * this.pInv) + 1;
+    this.pCells = this.pnx * this.pny;
+    this.pCount = new Int32Array(this.pCells);
+    this.pFirst = new Int32Array(this.pCells + 1);
+    this.pNext = new Int32Array(this.pCells);
+    this.pCellOf = new Int32Array(cap);
+    this.pos2 = new Float32Array(2 * cap);   // scratch for spatial re-sorting
+    this.vel2 = new Float32Array(2 * cap);
+    this.col2 = new Float32Array(3 * cap);
+    this.maxSpeed = 0;
+    this.hadObstacles = false;
+    const nx = this.nx, ny = this.ny, s = this.s;
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++)
+      s[i * ny + j] = (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) ? 0 : 1;
+  }
+
+  addParticle(x, y, vx, vy, r, g, b) {
+    if (this.num >= this.cap) return false;
+    const i = this.num++;
+    this.pos[2 * i] = x; this.pos[2 * i + 1] = y;
+    this.vel[2 * i] = vx; this.vel[2 * i + 1] = vy;
+    this.col[3 * i] = r; this.col[3 * i + 1] = g; this.col[3 * i + 2] = b;
+    return true;
+  }
+
+  removeParticle(i) {
+    const last = --this.num;
+    if (i === last) return;
+    const p = this.pos, v = this.vel, c = this.col;
+    p[2 * i] = p[2 * last]; p[2 * i + 1] = p[2 * last + 1];
+    v[2 * i] = v[2 * last]; v[2 * i + 1] = v[2 * last + 1];
+    c[3 * i] = c[3 * last]; c[3 * i + 1] = c[3 * last + 1]; c[3 * i + 2] = c[3 * last + 2];
+  }
+
+  clearGrid() { this.u.fill(0); this.v.fill(0); this.pu.fill(0); this.pv.fill(0); }
+
+  // finger "spoons" become moving solid cells
+  setObstacles(obs) {
+    if (!obs.length && !this.hadObstacles) return;
+    const nx = this.nx, ny = this.ny, h = this.h, s = this.s, u = this.u, v = this.v;
+    for (let i = 1; i < nx - 1; i++) for (let j = 1; j < ny - 1; j++) s[i * ny + j] = 1;
+    for (let k = 0; k < obs.length; k++) {
+      const o = obs[k], r2 = o.r * o.r;
+      const i0 = Math.max(1, Math.floor((o.x - o.r) * this.invH) - 1), i1 = Math.min(nx - 2, Math.ceil((o.x + o.r) * this.invH) + 1);
+      const j0 = Math.max(1, Math.floor((o.y - o.r) * this.invH) - 1), j1 = Math.min(ny - 2, Math.ceil((o.y + o.r) * this.invH) + 1);
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const dx = (i + 0.5) * h - o.x, dy = (j + 0.5) * h - o.y;
+        if (dx * dx + dy * dy < r2) {
+          const c = i * ny + j;
+          s[c] = 0;
+          u[c] = o.vx; u[c + ny] = o.vx;
+          v[c] = o.vy; v[c + 1] = o.vy;
+        }
+      }
+    }
+    this.hadObstacles = obs.length > 0;
+  }
+
+  integrate(dt, gx, gy) {
+    const pos = this.pos, vel = this.vel, n = this.num, vmax2 = VMAX * VMAX;
+    let m2 = 0;
+    for (let i = 0; i < n; i++) {
+      let vx = vel[2 * i] + dt * gx, vy = vel[2 * i + 1] + dt * gy;
+      let s2 = vx * vx + vy * vy;
+      if (s2 > vmax2) { const k = VMAX / Math.sqrt(s2); vx *= k; vy *= k; s2 = vmax2; }
+      if (s2 > m2) m2 = s2;
+      vel[2 * i] = vx; vel[2 * i + 1] = vy;
+      pos[2 * i] += vx * dt; pos[2 * i + 1] += vy * dt;
+    }
+    this.maxSpeed = Math.sqrt(m2);
+  }
+
+  // Re-sorts particles by hash cell every step (cache-friendly), then pushes overlapping pairs apart
+  pushApart(iters, mix) {
+    const np = this.num, pInv = this.pInv, pnx = this.pnx, pny = this.pny, nCells = this.pCells;
+    const count = this.pCount, first = this.pFirst, next = this.pNext, cellOf = this.pCellOf;
+    const opos = this.pos, ovel = this.vel, ocol = this.col;
+    count.fill(0);
+    for (let i = 0; i < np; i++) {
+      let xi = Math.floor(opos[2 * i] * pInv), yi = Math.floor(opos[2 * i + 1] * pInv);
+      xi = xi < 0 ? 0 : xi >= pnx ? pnx - 1 : xi;
+      yi = yi < 0 ? 0 : yi >= pny ? pny - 1 : yi;
+      const c = xi * pny + yi;
+      cellOf[i] = c; count[c]++;
+    }
+    let acc = 0;
+    for (let c = 0; c < nCells; c++) { first[c] = acc; next[c] = acc; acc += count[c]; }
+    first[nCells] = acc;
+    const pos = this.pos2, vel = this.vel2, col = this.col2;
+    for (let i = 0; i < np; i++) {
+      const j = next[cellOf[i]]++;
+      pos[2 * j] = opos[2 * i]; pos[2 * j + 1] = opos[2 * i + 1];
+      vel[2 * j] = ovel[2 * i]; vel[2 * j + 1] = ovel[2 * i + 1];
+      col[3 * j] = ocol[3 * i]; col[3 * j + 1] = ocol[3 * i + 1]; col[3 * j + 2] = ocol[3 * i + 2];
+    }
+    this.pos2 = opos; this.vel2 = ovel; this.col2 = ocol;
+    this.pos = pos; this.vel = vel; this.col = col;
+
+    const minD = 2 * this.r, minD2 = minD * minD;
+    for (let it = 0; it < iters; it++) {
+      for (let i = 0; i < np; i++) {
+        const px = pos[2 * i], py = pos[2 * i + 1];
+        const pxi = Math.floor(px * pInv), pyi = Math.floor(py * pInv);
+        const x0 = pxi > 0 ? pxi - 1 : 0, x1 = pxi + 1 < pnx ? pxi + 1 : pnx - 1;
+        const y0 = pyi > 0 ? pyi - 1 : 0, y1 = pyi + 1 < pny ? pyi + 1 : pny - 1;
+        if (x0 > x1 || y0 > y1) continue;
+        for (let xi = x0; xi <= x1; xi++) {
+          const kEnd = first[xi * pny + y1 + 1];      // cells (xi, y0..y1) are contiguous
+          for (let id = first[xi * pny + y0]; id < kEnd; id++) {
+            if (id === i) continue;
+            let dx = pos[2 * id] - px, dy = pos[2 * id + 1] - py;
+            const d2 = dx * dx + dy * dy;
+            if (d2 > minD2 || d2 === 0) continue;
+            const d = Math.sqrt(d2), s = 0.5 * (minD - d) / d;
+            dx *= s; dy *= s;
+            pos[2 * i] -= dx; pos[2 * i + 1] -= dy;
+            pos[2 * id] += dx; pos[2 * id + 1] += dy;
+            if (mix > 0) {
+              const a = 3 * i, b = 3 * id;
+              const r0 = col[a], r1 = col[b], g0 = col[a + 1], g1 = col[b + 1], b0 = col[a + 2], b1 = col[b + 2];
+              const dr = (r1 - r0) * 0.5 * mix, dg = (g1 - g0) * 0.5 * mix, db = (b1 - b0) * 0.5 * mix;
+              col[a] = r0 + dr; col[b] = r1 - dr;
+              col[a + 1] = g0 + dg; col[b + 1] = g1 - dg;
+              col[a + 2] = b0 + db; col[b + 2] = b1 - db;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  collide(obs) {
+    const pos = this.pos, vel = this.vel, n = this.num, h = this.h, r = this.r;
+    const minX = h + r, maxX = (this.nx - 1) * h - r, minY = h + r, maxY = (this.ny - 1) * h - r;
+    const no = obs.length;
+    for (let i = 0; i < n; i++) {
+      let x = pos[2 * i], y = pos[2 * i + 1];
+      for (let k = 0; k < no; k++) {
+        const o = obs[k], dx = x - o.x, dy = y - o.y, d2 = dx * dx + dy * dy, md = o.r + r;
+        if (d2 < md * md) {
+          const d = Math.sqrt(d2);
+          if (d > 1e-6) { x = o.x + dx / d * md; y = o.y + dy / d * md; } else { x = o.x + md; }
+          vel[2 * i] = o.vx; vel[2 * i + 1] = o.vy;
+        }
+      }
+      if (x < minX) { x = minX; vel[2 * i] = 0; }
+      if (x > maxX) { x = maxX; vel[2 * i] = 0; }
+      if (y < minY) { y = minY; vel[2 * i + 1] = 0; }
+      if (y > maxY) { y = maxY; vel[2 * i + 1] = 0; }
+      pos[2 * i] = x; pos[2 * i + 1] = y;
+    }
+  }
+
+  p2g() {
+    const nx = this.nx, ny = this.ny, h = this.h, h1 = this.invH, h2 = 0.5 * h;
+    const u = this.u, v = this.v, du = this.du, dv = this.dv, s = this.s, type = this.type;
+    const pos = this.pos, vel = this.vel, np = this.num, nc = this.numCells;
+    this.pu.set(u); this.pv.set(v);
+    du.fill(0); dv.fill(0); u.fill(0); v.fill(0);
+    for (let i = 0; i < nc; i++) type[i] = s[i] === 0 ? SOLID : AIR;
+    for (let i = 0; i < np; i++) {
+      const xi = clamp(Math.floor(pos[2 * i] * h1), 0, nx - 1);
+      const yi = clamp(Math.floor(pos[2 * i + 1] * h1), 0, ny - 1);
+      const c = xi * ny + yi;
+      if (type[c] === AIR) type[c] = FLUID;
+    }
+    const xmax = (nx - 1) * h, ymax = (ny - 1) * h;
+    for (let comp = 0; comp < 2; comp++) {
+      const dx = comp === 0 ? 0 : h2, dy = comp === 0 ? h2 : 0;
+      const f = comp === 0 ? u : v, d = comp === 0 ? du : dv;
+      for (let i = 0; i < np; i++) {
+        const x = clamp(pos[2 * i], h, xmax) - dx, y = clamp(pos[2 * i + 1], h, ymax) - dy;
+        const x0 = Math.min(Math.floor(x * h1), nx - 2), tx = (x - x0 * h) * h1, x1 = Math.min(x0 + 1, nx - 2);
+        const y0 = Math.min(Math.floor(y * h1), ny - 2), ty = (y - y0 * h) * h1, y1 = Math.min(y0 + 1, ny - 2);
+        const sx = 1 - tx, sy = 1 - ty;
+        const d0 = sx * sy, d1 = tx * sy, d2 = tx * ty, d3 = sx * ty;
+        const n0 = x0 * ny + y0, n1 = x1 * ny + y0, n2 = x1 * ny + y1, n3 = x0 * ny + y1;
+        const pv = vel[2 * i + comp];
+        f[n0] += pv * d0; d[n0] += d0;
+        f[n1] += pv * d1; d[n1] += d1;
+        f[n2] += pv * d2; d[n2] += d2;
+        f[n3] += pv * d3; d[n3] += d3;
+      }
+      for (let i = 0; i < nc; i++) if (d[i] > 0) f[i] /= d[i];
+    }
+    const pu = this.pu, pvv = this.pv, fc = this.fluidCells;
+    let nf = 0;
+    for (let i = 0; i < nx; i++) {
+      for (let j = 0; j < ny; j++) {
+        const c = i * ny + j, solid = type[c] === SOLID;
+        if (solid || (i > 0 && type[c - ny] === SOLID)) u[c] = pu[c];
+        if (solid || (j > 0 && type[c - 1] === SOLID)) v[c] = pvv[c];
+        if (type[c] === FLUID && i > 0 && j > 0 && i < nx - 1 && j < ny - 1) fc[nf++] = c;
+      }
+    }
+    this.numFluid = nf;
+  }
+
+  updateDensity() {
+    const nx = this.nx, ny = this.ny, h = this.h, h1 = this.invH, h2 = 0.5 * h;
+    const d = this.dens, pos = this.pos, np = this.num;
+    const xmax = (nx - 1) * h, ymax = (ny - 1) * h;
+    d.fill(0);
+    for (let i = 0; i < np; i++) {
+      const x = clamp(pos[2 * i], h, xmax) - h2, y = clamp(pos[2 * i + 1], h, ymax) - h2;
+      const x0 = Math.floor(x * h1), tx = (x - x0 * h) * h1, x1 = Math.min(x0 + 1, nx - 2);
+      const y0 = Math.floor(y * h1), ty = (y - y0 * h) * h1, y1 = Math.min(y0 + 1, ny - 2);
+      const sx = 1 - tx, sy = 1 - ty;
+      d[x0 * ny + y0] += sx * sy; d[x1 * ny + y0] += tx * sy;
+      d[x1 * ny + y1] += tx * ty; d[x0 * ny + y1] += sx * ty;
+    }
+  }
+
+  solve(iters, omega) {
+    const u = this.u, v = this.v, s = this.s, dens = this.dens, ny = this.ny;
+    const rd = this.restDensity, fc = this.fluidCells, nf = this.numFluid;
+    this.pu.set(u); this.pv.set(v);
+    for (let it = 0; it < iters; it++) {
+      for (let k = 0; k < nf; k++) {
+        const c = fc[k];
+        const sx0 = s[c - ny], sx1 = s[c + ny], sy0 = s[c - 1], sy1 = s[c + 1];
+        const ss = sx0 + sx1 + sy0 + sy1;
+        if (ss === 0) continue;
+        let div = u[c + ny] - u[c] + v[c + 1] - v[c];
+        const comp = dens[c] - rd;
+        if (comp > 0) div -= comp;           // push apart over-packed cells (volume drift fix)
+        const p = -div / ss * omega;
+        u[c] -= sx0 * p; u[c + ny] += sx1 * p;
+        v[c] -= sy0 * p; v[c + 1] += sy1 * p;
+      }
+    }
+  }
+
+  g2p(flip) {
+    const nx = this.nx, ny = this.ny, h = this.h, h1 = this.invH, h2 = 0.5 * h;
+    const type = this.type, pos = this.pos, vel = this.vel, np = this.num;
+    const xmax = (nx - 1) * h, ymax = (ny - 1) * h;
+    for (let comp = 0; comp < 2; comp++) {
+      const dx = comp === 0 ? 0 : h2, dy = comp === 0 ? h2 : 0;
+      const f = comp === 0 ? this.u : this.v, pf = comp === 0 ? this.pu : this.pv;
+      const off = comp === 0 ? ny : 1;
+      for (let i = 0; i < np; i++) {
+        const x = clamp(pos[2 * i], h, xmax) - dx, y = clamp(pos[2 * i + 1], h, ymax) - dy;
+        const x0 = Math.min(Math.floor(x * h1), nx - 2), tx = (x - x0 * h) * h1, x1 = Math.min(x0 + 1, nx - 2);
+        const y0 = Math.min(Math.floor(y * h1), ny - 2), ty = (y - y0 * h) * h1, y1 = Math.min(y0 + 1, ny - 2);
+        const sx = 1 - tx, sy = 1 - ty;
+        const n0 = x0 * ny + y0, n1 = x1 * ny + y0, n2 = x1 * ny + y1, n3 = x0 * ny + y1;
+        // a face counts if it touches fluid or separates fluid/air from a solid (free-slip walls)
+        const a0 = type[n0], b0 = type[n0 - off], a1 = type[n1], b1 = type[n1 - off];
+        const a2 = type[n2], b2 = type[n2 - off], a3 = type[n3], b3 = type[n3 - off];
+        const d0 = (a0 !== b0 || a0 === FLUID) ? sx * sy : 0;
+        const d1 = (a1 !== b1 || a1 === FLUID) ? tx * sy : 0;
+        const d2 = (a2 !== b2 || a2 === FLUID) ? tx * ty : 0;
+        const d3 = (a3 !== b3 || a3 === FLUID) ? sx * ty : 0;
+        const w = d0 + d1 + d2 + d3;
+        if (w > 0) {
+          const pic = (d0 * f[n0] + d1 * f[n1] + d2 * f[n2] + d3 * f[n3]) / w;
+          const corr = (d0 * (f[n0] - pf[n0]) + d1 * (f[n1] - pf[n1]) + d2 * (f[n2] - pf[n2]) + d3 * (f[n3] - pf[n3])) / w;
+          vel[2 * i + comp] = (1 - flip) * pic + flip * (vel[2 * i + comp] + corr);
+        }
+      }
+    }
+  }
+
+  step(dt, gx, gy, obs, pressureIters, mix) {
+    this.setObstacles(obs);
+    this.integrate(dt, gx, gy);
+    this.pushApart(SEP_ITERS, mix);
+    this.collide(obs);
+    this.p2g();
+    this.updateDensity();
+    this.solve(pressureIters, OMEGA);
+    this.g2p(FLIP_RATIO);
+  }
+}
+
+// ===================================================================
+//  WebGL renderer: metaball liquid with refraction + gloss
+// ===================================================================
+const VS_P = `
+attribute vec2 aPos; attribute vec3 aCol; attribute float aSpd;
+uniform vec2 uScale; uniform vec2 uOffset; uniform float uSize;
+varying vec3 vCol; varying float vSpd;
+void main(){ gl_Position = vec4(aPos * uScale + uOffset, 0.0, 1.0); gl_PointSize = uSize; vCol = aCol; vSpd = aSpd; }`;
+const FS_P = `
+precision mediump float;
+varying vec3 vCol; varying float vSpd;
+void main(){
+  vec2 c = gl_PointCoord * 2.0 - 1.0; float q = dot(c, c);
+  if (q >= 1.0) discard;
+  float w = 1.0 - q; w *= w * 0.25;
+  float foam = smoothstep(2.4, 6.0, vSpd) * 0.55;
+  gl_FragColor = vec4(mix(vCol, vec3(1.0), foam) * w, w);
+}`;
+const VS_Q = `
+attribute vec2 aQuad; varying vec2 vUv;
+void main(){ vUv = aQuad * 0.5 + 0.5; gl_Position = vec4(aQuad, 0.0, 1.0); }`;
+const FS_Q = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+varying vec2 vUv;
+uniform sampler2D uTex;
+uniform vec2 uTexel; uniform vec2 uRes; uniform float uDpr;
+uniform vec4 uFing[5];
+float den(vec2 uv){ return min(texture2D(uTex, uv).a * 4.0, 1.25); }
+vec3 backdrop(vec2 px){
+  vec2 uv = px / uRes;
+  vec3 c = mix(vec3(0.018, 0.024, 0.05), vec3(0.062, 0.078, 0.145), uv.y);
+  float big = 56.0 * uDpr, small = big * 0.25;
+  vec2 dl = abs(fract(px / big + 0.5) - 0.5) * big;
+  vec2 ds = abs(fract(px / small + 0.5) - 0.5) * small;
+  float major = 1.0 - smoothstep(0.4 * uDpr, 1.4 * uDpr, min(dl.x, dl.y));
+  float minor = 1.0 - smoothstep(0.25 * uDpr, 1.0 * uDpr, min(ds.x, ds.y));
+  c += vec3(0.05, 0.07, 0.12) * major + vec3(0.017, 0.023, 0.042) * minor;
+  vec2 q = uv - 0.5;
+  return c * (1.0 - 0.8 * dot(q, q));
+}
+void main(){
+  vec2 uv = vUv, px = uv * uRes;
+  vec4 s = texture2D(uTex, uv);
+  float d = min(s.a * 4.0, 1.25);
+  vec2 e = uTexel * 2.0;
+  vec2 grad = vec2(den(uv + vec2(e.x, 0.0)) - den(uv - vec2(e.x, 0.0)),
+                   den(uv + vec2(0.0, e.y)) - den(uv - vec2(0.0, e.y)));
+  const float T = 0.5;
+  float edge = smoothstep(T - 0.06, T + 0.06, d);
+  vec3 plain = backdrop(px);
+  vec3 col = plain;
+  if (edge > 0.002) {
+    vec3 lc = s.a > 0.003 ? s.rgb / s.a : vec3(0.25, 0.55, 1.0);
+    float depth = smoothstep(T, 1.1, d);
+    vec3 refr = backdrop(px - grad * 24.0 * uDpr);
+    vec3 body = mix(refr, lc * (1.1 - 0.25 * depth), 0.66 + 0.24 * depth);
+    float rim = edge * (1.0 - smoothstep(T + 0.03, T + 0.3, d));
+    body = mix(body, lc * 1.25 + 0.22, rim * 0.5);
+    vec3 n = normalize(vec3(-grad * 4.5 * (1.0 - 0.6 * depth), 1.0));
+    vec3 L = normalize(vec3(-0.5, 0.62, 0.9));
+    float spec = pow(max(dot(reflect(-L, n), vec3(0.0, 0.0, 1.0)), 0.0), 30.0);
+    body += spec * 0.75;
+    col = mix(plain, body, edge);
+  }
+  for (int i = 0; i < 5; i++) {
+    vec4 f = uFing[i];
+    if (f.w < 0.5) continue;
+    float dist = length(px - f.xy);
+    float ring = 1.0 - smoothstep(0.8 * uDpr, 2.2 * uDpr, abs(dist - f.z));
+    vec3 rc = f.w < 1.5 ? vec3(1.0) : (f.w < 2.5 ? vec3(0.6, 0.88, 1.0) : vec3(1.0, 0.45, 0.45));
+    float fill = (1.0 - smoothstep(f.z - 1.5 * uDpr, f.z, dist)) * (f.w < 1.5 ? 0.18 : 0.07);
+    col = mix(col, rc, max(ring * 0.7, fill));
+  }
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+function createGLRenderer(canvas) {
+  const opts = { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' };
+  const gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+  if (!gl) return null;
+  let progP, progQ, quadBuf, pbuf = null, pbufCap = 0, vdata = null, tD = null, maxPoint = 64;
+
+  const shader = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS) && !gl.isContextLost()) throw new Error(gl.getShaderInfoLog(s) || 'shader');
+    return s;
+  };
+  const program = (vs, fs) => {
+    const p = gl.createProgram();
+    gl.attachShader(p, shader(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, shader(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS) && !gl.isContextLost()) throw new Error(gl.getProgramInfoLog(p) || 'link');
+    const o = { p, u: {}, a: {} };
+    const nu = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS) || 0;
+    for (let i = 0; i < nu; i++) { const inf = gl.getActiveUniform(p, i); o.u[inf.name.replace(/\[0\]$/, '')] = gl.getUniformLocation(p, inf.name); }
+    for (const n of ['aPos', 'aCol', 'aSpd', 'aQuad']) o.a[n] = gl.getAttribLocation(p, n);
+    return o;
+  };
+  const target = (w, h) => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { tex, fb, w, h };
+  };
+  const freeTarget = t => { if (t) { gl.deleteTexture(t.tex); gl.deleteFramebuffer(t.fb); } };
+
+  function init() {
+    progP = program(VS_P, FS_P); progQ = program(VS_Q, FS_Q);
+    quadBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    pbuf = null; pbufCap = 0; tD = null;
+    const r = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE);
+    maxPoint = r ? r[1] : 64;
+  }
+  const disableAttribs = () => { for (let i = 0; i < 4; i++) gl.disableVertexAttribArray(i); };
+  const attrib = (loc, size, off) => { if (loc < 0) return; gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 24, off); };
+  const usePart = (pr, sx, sy, ox, oy, size) => {
+    gl.useProgram(pr.p);
+    disableAttribs();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pbuf);
+    attrib(pr.a.aPos, 2, 0); attrib(pr.a.aCol, 3, 8); attrib(pr.a.aSpd, 1, 20);
+    gl.uniform2f(pr.u.uScale, sx, sy); gl.uniform2f(pr.u.uOffset, ox, oy); gl.uniform1f(pr.u.uSize, Math.min(size, maxPoint));
+  };
+
+  init();
+  return {
+    kind: 'webgl',
+    init,
+    resize(w, h) {
+      canvas.width = w; canvas.height = h;
+      const tw = Math.max(1, Math.round(w * 0.5)), th = Math.max(1, Math.round(h * 0.5));
+      if (!tD || tD.w !== tw || tD.h !== th) { freeTarget(tD); tD = target(tw, th); }
+    },
+    draw(f, fingerArr, dpr) {
+      if (gl.isContextLost() || !tD) return;
+      const n = f.num, W = canvas.width, H = canvas.height, tw = tD.w, th = tD.h;
+      if (n > 0) {
+        if (!pbuf || pbufCap < f.cap) {
+          pbufCap = f.cap; vdata = new Float32Array(pbufCap * 6);
+          if (!pbuf) pbuf = gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER, pbuf);
+          gl.bufferData(gl.ARRAY_BUFFER, vdata.byteLength, gl.DYNAMIC_DRAW);
+        }
+        const pos = f.pos, vel = f.vel, col = f.col;
+        for (let i = 0, o = 0; i < n; i++, o += 6) {
+          vdata[o] = pos[2 * i]; vdata[o + 1] = pos[2 * i + 1];
+          vdata[o + 2] = col[3 * i]; vdata[o + 3] = col[3 * i + 1]; vdata[o + 4] = col[3 * i + 2];
+          const vx = vel[2 * i], vy = vel[2 * i + 1];
+          vdata[o + 5] = Math.sqrt(vx * vx + vy * vy);
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, pbuf);
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, vdata.subarray(0, n * 6));
+      }
+      const sx = 2 / f.vw, sy = -2 / f.vh, ox = -1 - f.vx0 * sx, oy = 1 - f.vy0 * sy;
+      const ppu = tw / f.vw;
+      gl.clearColor(0, 0, 0, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, tD.fb); gl.viewport(0, 0, tw, th); gl.clear(gl.COLOR_BUFFER_BIT);
+      if (n > 0) {
+        gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+        usePart(progP, sx, sy, ox, oy, 2 * 2.8 * f.r * ppu);
+        gl.drawArrays(gl.POINTS, 0, n);
+        gl.disable(gl.BLEND);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, W, H);
+      gl.useProgram(progQ.p);
+      disableAttribs();
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+      gl.enableVertexAttribArray(progQ.a.aQuad);
+      gl.vertexAttribPointer(progQ.a.aQuad, 2, gl.FLOAT, false, 0, 0);
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tD.tex);
+      gl.uniform1i(progQ.u.uTex, 0);
+      gl.uniform2f(progQ.u.uTexel, 1 / tw, 1 / th);
+      gl.uniform2f(progQ.u.uRes, W, H);
+      gl.uniform1f(progQ.u.uDpr, dpr);
+      gl.uniform4fv(progQ.u.uFing, fingerArr);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+  };
+}
+
+// Plain 2D fallback if WebGL is unavailable
+function create2DRenderer(canvas) {
+  const ctx = canvas.getContext('2d');
+  return {
+    kind: '2d', init() {},
+    resize(w, h) { canvas.width = w; canvas.height = h; },
+    draw(f) {
+      const W = canvas.width, H = canvas.height;
+      ctx.fillStyle = '#0a0f1e'; ctx.fillRect(0, 0, W, H);
+      const sx = W / f.vw, sy = H / f.vh, rr = f.r * sx * 1.7;
+      for (let i = 0; i < f.num; i++) {
+        ctx.fillStyle = `rgb(${f.col[3 * i] * 255 | 0},${f.col[3 * i + 1] * 255 | 0},${f.col[3 * i + 2] * 255 | 0})`;
+        ctx.fillRect((f.pos[2 * i] - f.vx0) * sx - rr, (f.pos[2 * i + 1] - f.vy0) * sy - rr, 2 * rr, 2 * rr);
+      }
+    },
+  };
+}
+
+// ===================================================================
+//  App state
+// ===================================================================
+const $ = id => document.getElementById(id);
+const stage = $('stage'), canvas = $('gl');
+let renderer = null;
+try { renderer = createGLRenderer(canvas); } catch (e) { console.warn('WebGL failed, using 2D', e); renderer = null; }
+if (!renderer) renderer = create2DRenderer(canvas);
+
+let fluid = null;
+let scene = 'layers';
+let started = false;
+let tool = 'stir';
+let pourColor = 0;                  // palette index, -1 = rainbow
+const view = { cssW: 0, cssH: 0, dpr: 1, angle: 0 };
+const fingers = new Map();
+const obstacles = [];
+const gNow = { x: 0, y: 1 };
+const pad = { x: 0, y: 1 };
+const fingerArr = new Float32Array(20);
+
+function buildFluid(cssW, cssH) {
+  const q = QUALITY[settings.quality];
+  const aspect = cssW / cssH;
+  const innerW = aspect >= 1 ? SHORT_SIDE * aspect : SHORT_SIDE;
+  const innerH = aspect >= 1 ? SHORT_SIDE : SHORT_SIDE / aspect;
+  const h = SHORT_SIDE / q.res, r = 0.3 * h;
+  const cap = Math.ceil(innerW * innerH * 0.62 / (2 * Math.sqrt(3) * r * r)) + 64;
+  return new Fluid(innerW, innerH, h, cap);
+}
+
+// ---------- scenes ----------
+function seedScene(name) {
+  scene = name;
+  const f = fluid;
+  f.num = 0; f.clearGrid();
+  const r = f.r, h = f.h, W = f.innerW, H = f.innerH;
+  const dx = 2 * r, dy = Math.sqrt(3) * r;
+  const block = (fx0, fy0, fx1, fy1, colorAt, inside) => {
+    const x0 = h + fx0 * W, x1 = h + fx1 * W, y0 = h + fy0 * H, y1 = h + fy1 * H;
+    let row = 0;
+    for (let y = y1 - r - 1e-6; y >= y0 + r; y -= dy, row++) {
+      for (let x = x0 + r + (row & 1 ? r : 0); x <= x1 - r; x += dx) {
+        if (inside && !inside(x, y)) continue;
+        const c = colorAt(x, y), j = 0.93 + Math.random() * 0.14;
+        f.addParticle(x, y, 0, 0, Math.min(1, c[0] * j), Math.min(1, c[1] * j), Math.min(1, c[2] * j));
+      }
+    }
+  };
+  const C = COLORS;
+  if (name === 'dam') {
+    block(0, 0.06, 0.42, 1, (x, y) => mixc(C[0], [0.55, 0.8, 1], clamp(1 - (y - h) / H, 0, 1) * 0.45));
+  } else if (name === 'twin') {
+    block(0, 0.12, 0.3, 1, () => C[2]);
+    block(0.7, 0.12, 1, 1, () => C[1]);
+  } else if (name === 'layers') {
+    const bands = [C[5], C[0], C[1], C[4]], top = 0.56;
+    block(0, top, 1, 1, (x, y) => bands[clamp(Math.floor((h + H - y) / ((1 - top) * H) * 4), 0, 3)]);
+  } else if (name === 'orb') {
+    const cx = h + W / 2, cy = h + H / 2, R = 0.36 * Math.min(W, H);
+    block(0, 0, 1, 1, (x, y) => rainbowAt(Math.atan2(y - cy, x - cx) / (2 * Math.PI)),
+      (x, y) => (x - cx) * (x - cx) + (y - cy) * (y - cy) < R * R);
+  }
+}
+
+// Move liquid into a re-shaped tank (screen rotation / resize / new quality), keeping it put in the real world
+function transplant(a, b, rotDeg) {
+  const ratio = (a.r * a.r) / (b.r * b.r);        // >1 when the new particles are smaller
+  const t = rotDeg * DEG, c = Math.round(Math.cos(t)), s = Math.round(Math.sin(t));
+  const rw = Math.abs(c) * a.innerW + Math.abs(s) * a.innerH, rh = Math.abs(s) * a.innerW + Math.abs(c) * a.innerH;
+  const kx = b.innerW / rw, ky = b.innerH / rh;
+  const minX = b.h + b.r, maxX = (b.nx - 1) * b.h - b.r, minY = b.h + b.r, maxY = (b.ny - 1) * b.h - b.r;
+  for (let i = 0; i < a.num; i++) {
+    let copies = Math.floor(ratio);
+    if (Math.random() < ratio - copies) copies++;
+    const x = a.pos[2 * i] - a.W / 2, y = a.pos[2 * i + 1] - a.H / 2;
+    const vx = a.vel[2 * i], vy = a.vel[2 * i + 1];
+    const nx = b.W / 2 + (x * c + y * s) * kx, ny = b.H / 2 + (-x * s + y * c) * ky;
+    for (let k = 0; k < copies; k++) {
+      const jx = k ? (Math.random() - 0.5) * 2 * b.r : 0, jy = k ? (Math.random() - 0.5) * 2 * b.r : 0;
+      if (!b.addParticle(clamp(nx + jx, minX, maxX), clamp(ny + jy, minY, maxY),
+        vx * c + vy * s, -vx * s + vy * c, a.col[3 * i], a.col[3 * i + 1], a.col[3 * i + 2])) return;
+    }
+  }
+}
+
+// ---------- screen orientation ----------
+const hasAngleAPI = !!(screen.orientation && typeof screen.orientation.angle === 'number') || typeof window.orientation === 'number';
+let guessedAngle = 0;
+function readScreenAngle() {
+  if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+  if (typeof window.orientation === 'number') return window.orientation;
+  return guessedAngle;
+}
+const angleDelta = (a0, a1) => { const d = ((a1 - a0) % 360 + 540) % 360 - 180; return Math.round(d / 90) * 90; };
+
+let pendingRot = null;
+// The angle the current tank layout was built for (gravity is mapped with this, so sim and screen always agree)
+const layoutAngle = () => (hasAngleAPI ? view.angle : guessedAngle);
+function handleResize(force) {
+  const cssW = stage.clientWidth, cssH = stage.clientHeight;
+  if (!cssW || !cssH) return;
+  const q = QUALITY[settings.quality];
+  const dpr = Math.min(window.devicePixelRatio || 1, q.dpr);
+  let angle = hasAngleAPI ? readScreenAngle() : 0;
+  let rot = fluid && hasAngleAPI ? angleDelta(view.angle, angle) : 0;
+  if (Math.abs(rot) === 90 && view.cssW && (view.cssW > view.cssH) === (cssW > cssH)) {
+    // UI turned a quarter but the viewport hasn't changed shape yet: wait a moment for the resize
+    const now = performance.now();
+    if (!pendingRot || pendingRot.angle !== angle) pendingRot = { angle, since: now };
+    if (now - pendingRot.since < 700) {
+      clearTimeout(resizeTimer); resizeTimer = setTimeout(() => handleResize(false), 250);
+      angle = view.angle; rot = 0;
+    }
+  }
+  if (rot !== 0 || angle === readScreenAngle()) pendingRot = null;
+  const reshaped = !fluid || force || rot !== 0 || Math.abs(cssW / cssH - view.cssW / view.cssH) > 0.004;
+  if (reshaped) {
+    const old = fluid;
+    fluid = buildFluid(cssW, cssH);
+    if (old && force !== 'reseed') transplant(old, fluid, force === 'requality' ? 0 : rot);
+    else seedScene(scene);
+  }
+  view.cssW = cssW; view.cssH = cssH; view.dpr = dpr; view.angle = angle;
+  renderer.resize(Math.round(cssW * dpr), Math.round(cssH * dpr));
+  if (sensorState === 'live' && !hasAngleAPI) setTimeout(guessAngleFromGravity, 400);
+}
+let resizeTimer = 0;
+const onResize = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => handleResize(false), 120); };
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', onResize);
+if (screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener('change', onResize);
+
+// ===================================================================
+//  Motion sensors (gyro + accelerometer)
+// ===================================================================
+let sensorState = 'off';            // off | pending | live | failed
+let listenersOn = false, sensorTimer = 0;
+const sensor = { orient: null, aig: null, sign: 0, calib: 0 };
+const gSensor = { x: 0, y: 1 };
+// iOS reports accelerationIncludingGravity with the opposite sign to the spec; we auto-calibrate below
+const DEFAULT_SIGN = (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') ? 1 : -1;
+
+function orientGravity(o) {          // unit "down" vector in device axes from beta/gamma
+  const cb = Math.cos(o.b), sb = Math.sin(o.b), cg = Math.cos(o.g), sg = Math.sin(o.g);
+  return { x: sg * cb, y: -sb, z: -cb * cg };
+}
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  sensor.orient = { b: e.beta * DEG, g: e.gamma * DEG };
+  markLive();
+}
+function onMotion(e) {
+  const a = e.accelerationIncludingGravity;
+  if (!a || a.x == null || a.y == null || a.z == null) return;
+  sensor.aig = { x: a.x, y: a.y, z: a.z };
+  if (sensor.orient) {
+    const og = orientGravity(sensor.orient), m = Math.hypot(a.x, a.y, a.z);
+    if (m > 7 && m < 12.5) {
+      sensor.calib = sensor.calib * 0.9 + 0.1 * (a.x * og.x + a.y * og.y + a.z * og.z) / m;
+      if (Math.abs(sensor.calib) > 0.6) sensor.sign = Math.sign(sensor.calib);
+    }
+  }
+  markLive();
+}
+// effective gravity in device axes (g units): tilt from the gyro-fused orientation + shakes from the accelerometer
+function deviceGravity() {
+  const og = sensor.orient ? orientGravity(sensor.orient) : null, a = sensor.aig;
+  if (a && (sensor.sign !== 0 || !og)) {
+    const k = (sensor.sign || DEFAULT_SIGN) / GRAVITY;
+    const ag = { x: a.x * k, y: a.y * k, z: a.z * k };
+    if (!og) return ag;
+    const s = SHAKE_GAIN[settings.shake] || 1;
+    return { x: og.x + (ag.x - og.x) * s, y: og.y + (ag.y - og.y) * s, z: og.z + (ag.z - og.z) * s };
+  }
+  return og;
+}
+function deviceToScreen(d, angleDeg) {
+  const t = angleDeg * DEG, c = Math.cos(t), s = Math.sin(t), x0 = d.x, y0 = -d.y;
+  return { x: x0 * c + y0 * s, y: -x0 * s + y0 * c };
+}
+function guessAngleFromGravity() {   // last resort when the browser exposes no screen angle
+  if (hasAngleAPI) return;
+  const d = deviceGravity(); if (!d) return;
+  if (view.cssW > view.cssH) { if (Math.abs(d.x) > 0.25) guessedAngle = d.x < 0 ? 90 : -90; }
+  else if (Math.abs(d.y) > 0.25) guessedAngle = d.y < 0 ? 0 : 180;
+}
+function markLive() {
+  if (sensorState === 'live') return;
+  sensorState = 'live';
+  clearTimeout(sensorTimer);
+  guessAngleFromGravity();
+  if (started && !settings.preferPad) toast('Gyro on. Tilt to pour, shake for waves');
+  updateControlUI();
+}
+let failReason = '';
+function sensorFailed(reason) {
+  if (sensorState === 'live') return;
+  failReason = reason || '';
+  sensorState = 'failed';
+  updateControlUI();
+  if (started) {
+    toast(failReason === 'denied' ? 'Motion access was denied. Close this tab, reopen the page and tap Allow' : failReason === 'insecure' ? 'Gyro needs an https:// link. Drag the tilt pad for now' : 'Gyro isn’t available here. Drag the tilt pad to tilt', 4800);
+    $('tiltpad').classList.add('hint');
+    setTimeout(() => $('tiltpad').classList.remove('hint'), 4600);
+  }
+}
+function attachSensors() {
+  if (listenersOn) return;
+  listenersOn = true;
+  window.addEventListener('deviceorientation', onOrient);
+  window.addEventListener('devicemotion', onMotion);
+}
+// Must be called straight from a tap (iOS only shows its permission prompt for user gestures)
+function enableSensors() {
+  if (sensorState === 'live') return;
+  sensorState = 'pending'; failReason = '';
+  if (window.isSecureContext === false) { sensorFailed('insecure'); return; }
+  const DOE = window.DeviceOrientationEvent, DME = window.DeviceMotionEvent;
+  if (!DOE && !DME) { sensorFailed(); return; }
+  // Always listen: some browsers (newer Chrome) have requestPermission but still deliver events,
+  // so only give up when no sensor data actually shows up.
+  let denied = false;
+  const arm = () => {
+    attachSensors(); clearTimeout(sensorTimer);
+    sensorTimer = setTimeout(() => { if (sensorState !== 'live') sensorFailed(denied ? 'denied' : ''); }, 2500);
+  };
+  const ask = (E) => {
+    if (!E || typeof E.requestPermission !== 'function') return null;
+    try { return Promise.resolve(E.requestPermission()).then(r => { if (r === 'denied') denied = true; }, () => {}); }
+    catch (e) { return null; }
+  };
+  // both requests start inside the tap so iOS shows its prompt
+  const asks = [ask(DOE), ask(DME)].filter(Boolean);
+  attachSensors();
+  if (!asks.length) { arm(); return; }
+  clearTimeout(sensorTimer);
+  sensorTimer = setTimeout(() => { if (sensorState !== 'live') sensorFailed(denied ? 'denied' : ''); }, 8000);  // waits for the user to answer the prompt
+  Promise.all(asks).then(arm);
+}
+
+// ===================================================================
+//  Gravity (sensor / tilt pad / demo) + shake
+// ===================================================================
+const shake = { start: -1, end: -1 };
+const reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+let stageOffset = 0;
+function shakeDown(t) { shake.start = t; shake.end = Infinity; $('shakeBtn').classList.add('hot'); }
+function shakeUp(t) { if (shake.start < 0) return; shake.end = Math.max(t, shake.start + 0.65); $('shakeBtn').classList.remove('hot'); }
+function shakeAmp(t) {
+  if (shake.start < 0 || t < shake.start) return 0;
+  if (t <= shake.end) return Math.min(1, (t - shake.start) / 0.08);
+  const k = 1 - (t - shake.end) / 0.35;
+  return k > 0 ? k : 0;
+}
+const usingSensor = () => started && sensorState === 'live' && !settings.preferPad;
+
+function computeGravity(t) {
+  let gx, gy;
+  if (!started) {
+    const a = Math.sin(t * 0.6) * 0.28;
+    gx = Math.sin(a); gy = Math.cos(a);
+  } else if (usingSensor()) {
+    const d = deviceGravity();
+    if (d) {
+      const sg = deviceToScreen(d, layoutAngle() + settings.tiltOffset);
+      gSensor.x += (sg.x * G_GAIN - gSensor.x) * 0.55;
+      gSensor.y += (sg.y * G_GAIN - gSensor.y) * 0.55;
+    }
+    gx = gSensor.x; gy = gSensor.y;
+  } else {
+    gx = pad.x * G_GAIN; gy = pad.y * G_GAIN;
+  }
+  const amp = shakeAmp(t);
+  let off = 0;
+  if (amp > 0) {
+    const s = Math.sin((t - shake.start) * Math.PI * 2 * 1.5);
+    gx += s * 2.0 * amp;
+    off = reduceMotion ? 0 : s * 8 * amp;
+  }
+  if (Math.abs(off - stageOffset) > 0.05 || (off === 0 && stageOffset !== 0)) {
+    stageOffset = off;
+    canvas.style.transform = off ? `translate3d(${off.toFixed(2)}px,0,0)` : '';
+  }
+  const m = Math.hypot(gx, gy);
+  if (m > 3.2) { gx *= 3.2 / m; gy *= 3.2 / m; }
+  gNow.x = gx; gNow.y = gy;
+  return gNow;
+}
+
+// ===================================================================
+//  Touch tools: stir / pour / erase (multi-touch)
+// ===================================================================
+function toSim(clientX, clientY) {
+  const r = canvas.getBoundingClientRect(), f = fluid;
+  return { x: f.vx0 + (clientX - r.left) / r.width * f.vw, y: f.vy0 + (clientY - r.top) / r.height * f.vh };
+}
+canvas.addEventListener('pointerdown', e => {
+  if (!started || fingers.size >= 5) return;
+  e.preventDefault();
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  closePopovers();
+  const p = toSim(e.clientX, e.clientY);
+  fingers.set(e.pointerId, { x: p.x, y: p.y, lx: p.x, ly: p.y, vx: 0, vy: 0, cx: e.clientX, cy: e.clientY, tool, acc: 0 });
+});
+canvas.addEventListener('pointermove', e => {
+  const fg = fingers.get(e.pointerId); if (!fg) return;
+  const p = toSim(e.clientX, e.clientY);
+  fg.x = p.x; fg.y = p.y; fg.cx = e.clientX; fg.cy = e.clientY;
+});
+const endFinger = e => fingers.delete(e.pointerId);
+canvas.addEventListener('pointerup', endFinger);
+canvas.addEventListener('pointercancel', endFinger);
+canvas.addEventListener('lostpointercapture', endFinger);
+
+let lastFullToast = 0;
+function pourAt(fg, dt, t) {
+  const f = fluid;
+  fg.acc += POUR_AREA_RATE * dt / (2 * Math.sqrt(3) * f.r * f.r);
+  let n = Math.floor(fg.acc); fg.acc -= n;
+  const rgb = pourColor < 0 ? rainbowAt(t * 0.22) : COLORS[pourColor];
+  const gm = Math.hypot(gNow.x, gNow.y) || 1;
+  const bvx = fg.vx * 0.7 + gNow.x / gm * 0.8, bvy = fg.vy * 0.7 + gNow.y / gm * 0.8;
+  const minX = f.h + f.r, maxX = (f.nx - 1) * f.h - f.r, minY = f.h + f.r, maxY = (f.ny - 1) * f.h - f.r;
+  for (; n > 0; n--) {
+    if (f.num >= f.cap) {
+      if (t - lastFullToast > 3) { lastFullToast = t; toast('Tank’s full! Erase some liquid first'); }
+      return;
+    }
+    const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * POUR_R;
+    const x = clamp(fg.x + Math.cos(a) * rr, minX, maxX), y = clamp(fg.y + Math.sin(a) * rr, minY, maxY);
+    if (f.dens[Math.floor(x * f.invH) * f.ny + Math.floor(y * f.invH)] > f.restDensity * 1.15) continue;
+    const j = 0.92 + Math.random() * 0.16;
+    f.addParticle(x, y, bvx, bvy, Math.min(1, rgb[0] * j), Math.min(1, rgb[1] * j), Math.min(1, rgb[2] * j));
+  }
+}
+function eraseAt(fg, dt) {
+  const f = fluid, R2 = ERASE_R * ERASE_R, p = f.pos;
+  fg.acc += ERASE_AREA_RATE * dt / (2 * Math.sqrt(3) * f.r * f.r);
+  let budget = Math.floor(fg.acc); fg.acc -= budget;
+  for (let i = f.num - 1; i >= 0 && budget > 0; i--) {
+    const dx = p[2 * i] - fg.x, dy = p[2 * i + 1] - fg.y;
+    if (dx * dx + dy * dy < R2) { f.removeParticle(i); budget--; }
+  }
+}
+function processFingers(dt, t) {
+  obstacles.length = 0;
+  for (const fg of fingers.values()) {
+    fg.vx += ((fg.x - fg.lx) / dt - fg.vx) * 0.6;
+    fg.vy += ((fg.y - fg.ly) / dt - fg.vy) * 0.6;
+    const sp = Math.hypot(fg.vx, fg.vy);
+    if (sp > VMAX) { fg.vx *= VMAX / sp; fg.vy *= VMAX / sp; }
+    fg.lx = fg.x; fg.ly = fg.y;
+    if (fg.tool === 'stir') obstacles.push({ x: fg.x, y: fg.y, vx: fg.vx, vy: fg.vy, r: STIR_R });
+    else if (fg.tool === 'pour') pourAt(fg, dt, t);
+    else eraseAt(fg, dt);
+  }
+}
+function fingerUniforms() {
+  fingerArr.fill(0);
+  if (!fluid) return fingerArr;
+  const r = canvas.getBoundingClientRect(), W = canvas.width, H = canvas.height;
+  let k = 0;
+  for (const fg of fingers.values()) {
+    if (k >= 5) break;
+    const R = fg.tool === 'stir' ? STIR_R : fg.tool === 'pour' ? POUR_R * 1.3 : ERASE_R;
+    fingerArr[4 * k] = (fg.cx - r.left) / r.width * W;
+    fingerArr[4 * k + 1] = (1 - (fg.cy - r.top) / r.height) * H;
+    fingerArr[4 * k + 2] = R / fluid.vw * W;
+    fingerArr[4 * k + 3] = fg.tool === 'stir' ? 1 : fg.tool === 'pour' ? 2 : 3;
+    k++;
+  }
+  return fingerArr;
+}
+
+// ===================================================================
+//  UI
+// ===================================================================
+let toastTimer = 0;
+function toast(msg, ms = 2800) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+}
+
+// tools
+const dock = $('dock');
+function selectTool(name) {
+  if (!['stir', 'pour', 'erase'].includes(name)) return;
+  tool = name;
+  for (const x of $('tools').children) x.classList.toggle('on', x.dataset.tool === name);
+  dock.classList.toggle('pouring', tool === 'pour');
+}
+$('tools').addEventListener('click', e => { const b = e.target.closest('[data-tool]'); if (b) selectTool(b.dataset.tool); });
+// swatches
+const swWrap = $('swatches');
+PALETTE.forEach(([hex, name], i) => {
+  const b = document.createElement('button');
+  b.className = 'sw' + (i === 0 ? ' on' : ''); b.style.background = hex; b.dataset.i = i; b.setAttribute('aria-label', name); b.title = name;
+  swWrap.appendChild(b);
+});
+{
+  const b = document.createElement('button');
+  b.className = 'sw'; b.dataset.i = -1; b.title = 'Rainbow'; b.setAttribute('aria-label', 'Rainbow');
+  b.style.background = 'conic-gradient(#8b5cff,#2f8cff,#16d6c3,#a3e635,#ffa21a,#ff3d7f,#8b5cff)';
+  swWrap.appendChild(b);
+}
+function selectColor(i) {
+  if (!(i === -1 || (i >= 0 && i < PALETTE.length))) return;
+  pourColor = i;
+  for (const x of swWrap.children) x.classList.toggle('on', +x.dataset.i === i);
+}
+swWrap.addEventListener('click', e => { const b = e.target.closest('.sw'); if (b) selectColor(+b.dataset.i); });
+// shake (hold)
+const shakeBtn = $('shakeBtn');
+shakeBtn.addEventListener('pointerdown', e => { e.preventDefault(); try { shakeBtn.setPointerCapture(e.pointerId); } catch (err) {} shakeDown(performance.now() / 1000); });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => shakeBtn.addEventListener(ev, () => shakeUp(performance.now() / 1000)));
+// scenes
+const presets = $('presets');
+$('resetBtn').addEventListener('click', e => { e.stopPropagation(); presets.hidden = !presets.hidden; });
+presets.addEventListener('click', e => {
+  const b = e.target.closest('[data-scene]'); if (!b) return;
+  seedScene(b.dataset.scene); presets.hidden = true;
+});
+function closePopovers() { presets.hidden = true; }
+document.addEventListener('pointerdown', e => { if (!presets.hidden && !e.target.closest('#presets') && !e.target.closest('#resetBtn')) presets.hidden = true; });
+
+// tilt pad
+const padEl = $('tiltpad'), knob = $('knob'), padLine = $('padline');
+function placeKnob() {
+  if (!padEl.clientWidth) return;
+  const R = padEl.clientWidth / 2 - 21;
+  knob.style.transform = `translate(${(pad.x * R).toFixed(1)}px,${(pad.y * R).toFixed(1)}px)`;
+  const k = 132 / padEl.clientWidth;
+  padLine.setAttribute('x2', (66 + pad.x * R * k).toFixed(1));
+  padLine.setAttribute('y2', (66 + pad.y * R * k).toFixed(1));
+}
+let padId = null, lastPadTap = 0;
+function padFrom(e) {
+  const r = padEl.getBoundingClientRect(), R = r.width / 2 - 21;
+  let x = (e.clientX - (r.left + r.width / 2)) / R, y = (e.clientY - (r.top + r.height / 2)) / R;
+  const m = Math.hypot(x, y); if (m > 1) { x /= m; y /= m; }
+  pad.x = x; pad.y = y; placeKnob();
+}
+padEl.addEventListener('pointerdown', e => {
+  e.preventDefault(); padId = e.pointerId;
+  try { padEl.setPointerCapture(e.pointerId); } catch (err) {}
+  const now = performance.now();
+  if (now - lastPadTap < 300) { pad.x = 0; pad.y = 1; placeKnob(); padId = null; lastPadTap = 0; return; }
+  lastPadTap = now; padFrom(e);
+});
+padEl.addEventListener('pointermove', e => { if (e.pointerId === padId) padFrom(e); });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => padEl.addEventListener(ev, () => { padId = null; }));
+
+// keyboard (desktop): arrows turn gravity, space shakes
+window.addEventListener('keydown', e => {
+  if (!started) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    const m = Math.hypot(pad.x, pad.y) || 1, a = Math.atan2(pad.y, pad.x) + (e.key === 'ArrowLeft' ? 15 : -15) * DEG;
+    pad.x = Math.cos(a) * m; pad.y = Math.sin(a) * m; placeKnob(); e.preventDefault();
+  } else if (e.key === ' ' && !e.repeat) { shakeDown(performance.now() / 1000); e.preventDefault(); }
+});
+window.addEventListener('keyup', e => { if (e.key === ' ') shakeUp(performance.now() / 1000); });
+
+// settings sheet
+const sheetWrap = $('sheetwrap');
+function syncPills() {
+  for (const grp of document.querySelectorAll('.pills')) {
+    const key = grp.dataset.key;
+    const val = key === 'control' ? (settings.preferPad ? 'pad' : 'gyro') : String(settings[key]);
+    for (const b of grp.children) b.classList.toggle('on', b.dataset.v === val);
+  }
+}
+function updateControlUI() {
+  const live = sensorState === 'live';
+  const padMode = started && !usingSensor();
+  padEl.classList.toggle('show', padMode);
+  if (padMode) placeKnob();
+  $('glabel').textContent = !started ? 'Demo' : usingSensor() ? 'Gyro' : 'Tilt pad';
+  $('gchip').classList.toggle('on', usingSensor());
+  for (const el of document.querySelectorAll('.gyro-only')) el.hidden = !live;
+  $('retryGyro').hidden = live || !started;
+  $('gyroStatus').innerHTML = live
+    ? '<b>Gyro is on.</b> Tilt to pour, shake for waves. If the liquid falls the wrong way, tap Rotate 90° until it falls toward the floor.'
+    : '<b>Gyro is off.</b> Drag the tilt pad to tilt (centre = zero gravity, double-tap to reset). ' + (failReason === 'denied' ? 'Motion access was denied: close this tab, reopen the page and tap <b>Allow</b> (on older iOS: Settings → Safari → Motion &amp; Orientation Access).' : failReason === 'insecure' ? 'Motion sensors only work on an <b>https://</b> link.' : 'Open this page directly in Safari or Chrome on a phone/tablet to use the gyro.');
+  syncPills();
+}
+$('setBtn').addEventListener('click', () => { updateControlUI(); sheetWrap.hidden = false; });
+$('gchip').addEventListener('click', () => { updateControlUI(); sheetWrap.hidden = false; });
+$('closeSheet').addEventListener('click', () => { sheetWrap.hidden = true; });
+sheetWrap.addEventListener('click', e => { if (e.target === sheetWrap) sheetWrap.hidden = true; });
+$('sheet').addEventListener('click', e => {
+  const b = e.target.closest('.pills button'); if (!b) return;
+  const key = b.parentElement.dataset.key, v = b.dataset.v;
+  if (key === 'quality') { if (settings.quality !== v) { settings.quality = v; handleResize('requality'); } }
+  else if (key === 'mix') settings.mix = v;
+  else if (key === 'shake') settings.shake = +v;
+  else if (key === 'control') settings.preferPad = v === 'pad';
+  saveSettings(); updateControlUI();
+});
+$('rotTilt').addEventListener('click', () => {
+  settings.tiltOffset = (settings.tiltOffset + 90) % 360; saveSettings();
+  toast(`Tilt rotated ${settings.tiltOffset}°`);
+});
+$('retryGyro').addEventListener('click', () => { enableSensors(); });
+
+// start
+let wakeLock = null;
+function keepAwake() {
+  try {
+    if (!navigator.wakeLock || document.hidden || wakeLock) return;
+    navigator.wakeLock.request('screen').then(l => { wakeLock = l; l.addEventListener('release', () => { wakeLock = null; }); }).catch(() => {});
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (started && !document.hidden) keepAwake(); });
+function startGame(fromTap) {
+  if (fromTap) enableSensors();      // first, while we're still inside the tap (iOS permission prompt)
+  keepAwake();
+  started = true;
+  $('start').classList.add('gone');
+  updateControlUI();
+}
+$('startBtn').addEventListener('click', () => { startGame(true); seedScene('twin'); });
+
+// stop iOS page zoom / rubber-banding
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('touchmove', e => { if (!e.target.closest('#sheet')) e.preventDefault(); }, { passive: false });
+
+if (canvas.getContext && renderer.kind === 'webgl') {
+  canvas.addEventListener('webglcontextlost', e => e.preventDefault());
+  canvas.addEventListener('webglcontextrestored', () => { renderer.init(); handleResize(false); renderer.resize(canvas.width, canvas.height); });
+}
+
+// ===================================================================
+//  Main loop
+// ===================================================================
+let lastT = performance.now(), simAcc = 0, costEMA = 0, slowCount = 0, autoDropped = false;
+let hudAngle = 999, hudMag = -1, frameNo = 0;
+function updateHud(g) {
+  const m = Math.hypot(g.x, g.y), ang = Math.atan2(g.y, g.x) / DEG - 90;
+  if (Math.abs(ang - hudAngle) < 0.5 && Math.abs(m - hudMag) < 0.02) return;
+  hudAngle = ang; hudMag = m;
+  const el = $('garrow');
+  el.style.transform = `rotate(${ang.toFixed(1)}deg) scaleY(${clamp(m / G_GAIN, 0.2, 1.6).toFixed(2)})`;
+  el.style.opacity = m < 0.06 ? '0' : '1';
+}
+function autoQuality(costPerStep) {
+  costEMA = costEMA * 0.95 + costPerStep * 0.05;
+  if (!started || autoDropped || document.hidden || window.__sloshNoAuto) return;
+  slowCount = costEMA > 13 ? slowCount + 1 : 0;
+  if (slowCount > 180) {
+    const i = QUALITY_ORDER.indexOf(settings.quality);
+    if (i > 0) {
+      settings.quality = QUALITY_ORDER[i - 1]; autoDropped = true; saveSettings();
+      handleResize('requality'); toast('Lowered quality to keep things smooth');
+    }
+  }
+}
+function frame(now) {
+  requestAnimationFrame(frame);
+  let dt = (now - lastT) / 1000; lastT = now;
+  if (!(dt > 0) || dt > 0.25) dt = 1 / 60;
+  const t = now / 1000;
+  const g = computeGravity(t);
+  processFingers(Math.max(dt, 1 / 240), t);
+  simAcc += dt;
+  if (simAcc >= 1 / 75) {
+    const step = Math.min(simAcc, 1 / 30); simAcc = 0;
+    let sub = Math.ceil(step * 60 - 0.2);
+    sub = clamp(Math.max(sub, Math.ceil(fluid.maxSpeed * step / (1.5 * fluid.h))), 1, 3);
+    const sdt = step / sub, q = QUALITY[settings.quality], mix = MIX[settings.mix];
+    const t0 = performance.now();
+    for (let k = 0; k < sub; k++) fluid.step(sdt, g.x * GRAVITY, g.y * GRAVITY, obstacles, q.pressure, mix);
+    autoQuality((performance.now() - t0) / sub);
+  }
+  renderer.draw(fluid, fingerUniforms(), view.dpr);
+  updateHud(g);
+  // catch UI rotations that arrive without a resize (e.g. a 180° flip)
+  if (hasAngleAPI && ++frameNo % 30 === 0 && readScreenAngle() !== view.angle && !pendingRot) onResize();
+}
+document.addEventListener('visibilitychange', () => { lastT = performance.now(); });
+
+// test/debug hook
+window.__slosh = {
+  get fluid() { return fluid; }, get gravity() { return { ...gNow }; }, get sensorState() { return sensorState; },
+  get sensor() { return sensor; }, get renderer() { return renderer.kind; }, get costMs() { return costEMA; },
+  seed: seedScene, settings,
+};
+
+function boot(data) {
+  data = data && typeof data === 'object' ? data : {};
+  if (['twin', 'dam', 'layers', 'orb', 'empty'].includes(data.scene)) scene = data.scene;
+  if (data.pad && isFinite(data.pad.x) && isFinite(data.pad.y)) { pad.x = clamp(+data.pad.x, -1, 1); pad.y = clamp(+data.pad.y, -1, 1); }
+  if (data.tool) selectTool(data.tool);
+  if (Number.isInteger(data.pourColor)) selectColor(data.pourColor);
+  handleResize('reseed');
+  if (data.started) startGame(false);
+  updateControlUI();
+  placeKnob();
+  requestAnimationFrame(frame);
+}
+boot({});
+})();
+</script>
+</body>
+</html>
